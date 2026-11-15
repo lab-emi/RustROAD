@@ -6,13 +6,13 @@ use super::{
 use crate::{Error, Result};
 use rustroad_core::Rect;
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const MAX_BRIDGE_SHAPES: usize = 4096;
 
-/// Memory for portals and two directions of the unambiguous match table.
+/// Memory for portals, the cut index, projected shape order and match tables.
 pub(super) fn scratch_bytes(shapes: usize) -> usize {
-    shapes.min(MAX_BRIDGE_SHAPES) * 192
+    shapes.min(MAX_BRIDGE_SHAPES) * 288
 }
 
 #[derive(Deserialize)]
@@ -36,6 +36,7 @@ pub(super) struct Model {
     portal_cut: u32,
     pub(super) measured_layer: u32,
     bridge_layer: u32,
+    next_cut: Option<u32>,
     cut_square: i64,
     measured_pad_size: [i64; 2],
     bridge_pad_square: i64,
@@ -63,6 +64,7 @@ impl Profile {
         .any(|v| !(1..=cap).contains(&v))
             || self.cut_square_dbu % 2 != 0
             || self.bridge_pad_square_dbu % 2 != 0
+            || self.bridge_width_dbu % 2 != 0
             || self.portal_spacing_min_dbu > self.portal_spacing_max_dbu
             || self.portal_spacing_min_dbu <= self.measured_pad_width_dbu
             || self.receiver_cut_offset_dbu >= self.portal_spacing_min_dbu
@@ -101,11 +103,23 @@ impl Profile {
                 "cuts must share the measured routing layer",
             ));
         }
+        let mut next = prep
+            .cut_adjacent
+            .iter()
+            .filter_map(|(&cut, &(lo, _))| (lo == bridge_layer).then_some(cut));
+        let next_cut = next.next();
+        if next.next().is_some() {
+            return Err(fail(
+                "ANTENNA_SIDEWALL_MODEL",
+                "multiple cuts above the bridge layer",
+            ));
+        }
         Ok(Model {
             receiver_cut,
             portal_cut,
             measured_layer,
             bridge_layer,
+            next_cut,
             cut_square: self.cut_square_dbu,
             measured_pad_size: [self.measured_pad_width_dbu, self.measured_pad_height_dbu],
             bridge_pad_square: self.bridge_pad_square_dbu,
@@ -128,6 +142,7 @@ pub(super) struct Stage<'a> {
 struct Portal {
     center: [i128; 2],
     root: usize,
+    pad_axes: [bool; 2],
 }
 
 fn extent(rect: Rect) -> [i128; 2] {
@@ -163,15 +178,37 @@ fn assign_unique(map: &mut BTreeMap<usize, Option<usize>>, key: usize, value: us
         .or_insert(Some(value));
 }
 
+#[derive(Clone, Copy)]
+enum Axis {
+    X = 0,
+    Y = 1,
+}
+
+impl Axis {
+    fn along_cross<T: Copy>(self, coordinates: [T; 2]) -> [T; 2] {
+        match self {
+            Self::X => coordinates,
+            Self::Y => [coordinates[1], coordinates[0]],
+        }
+    }
+
+    fn rect(self, rect: Rect) -> Rect {
+        let [lx, ly] = self.along_cross([rect.lx, rect.ly]);
+        let [ux, uy] = self.along_cross([rect.ux, rect.uy]);
+        Rect { lx, ly, ux, uy }
+    }
+}
+
 struct BridgeGeometry<'a> {
+    axis: Axis,
     shapes: &'a [Shape],
     metal: &'a [usize],
     portals: &'a [usize],
+    next_cuts: &'a [usize],
 }
 
 impl Model {
     // Only the observed two pads and one straight wire may touch this span.
-    // Keep this local rule off T-junctions and the next via stack.
     fn isolated(
         &self,
         wire: Rect,
@@ -185,19 +222,21 @@ impl Model {
         let upper_x = points[1][0] + half;
         let lower_y = points[0][1] - half;
         let upper_y = points[0][1] + half;
+        let within_span = |r: Rect| {
+            i128::from(r.ux) >= lower_x
+                && i128::from(r.lx) <= upper_x
+                && i128::from(r.uy) >= lower_y
+                && i128::from(r.ly) <= upper_y
+        };
         let mut pads = [false; 2];
         for &i in geometry.metal {
             let shape = &geometry.shapes[i];
-            let rect = shape.rect;
+            let rect = geometry.axis.rect(shape.rect);
             charge(stats, request, 1)?;
-            if i128::from(rect.lx) > upper_x.max(i128::from(wire.ux)) {
+            if i128::from(rect.lx) > upper_x {
                 break;
             }
-            let span_overlap = i128::from(rect.ux) >= lower_x
-                && i128::from(rect.uy) >= lower_y
-                && i128::from(rect.ly) <= upper_y
-                && i128::from(rect.lx) <= upper_x;
-            if !span_overlap && !touch(wire, rect) {
+            if !within_span(rect) && !touch(wire, rect) {
                 continue;
             }
             if shape.terminal.is_some() {
@@ -206,11 +245,10 @@ impl Model {
             if rect == wire {
                 continue;
             }
-            let point = center(rect);
             if extent(rect) != [i128::from(self.bridge_pad_square); 2] {
                 return Ok(false);
             }
-            let Some(index) = points.iter().position(|&p| p == point) else {
+            let Some(index) = points.iter().position(|&p| p == center(rect)) else {
                 return Ok(false);
             };
             pads[index] = true;
@@ -219,16 +257,55 @@ impl Model {
             return Ok(false);
         }
         for &i in geometry.portals {
-            let rect = geometry.shapes[i].rect;
+            let rect = geometry.axis.rect(geometry.shapes[i].rect);
             charge(stats, request, 1)?;
-            if i128::from(rect.lx) >= upper_x.max(i128::from(wire.ux)) {
+            if i128::from(rect.lx) > upper_x {
                 break;
             }
             if overlap(wire, rect) && !points.contains(&center(rect)) {
                 return Ok(false);
             }
         }
+        for &i in geometry.next_cuts {
+            let rect = geometry.axis.rect(geometry.shapes[i].rect);
+            charge(stats, request, 1)?;
+            if i128::from(rect.lx) > upper_x {
+                break;
+            }
+            if within_span(rect) {
+                return Ok(false);
+            }
+        }
         Ok(true)
+    }
+
+    fn bridge_exists(
+        &self,
+        points: [[i128; 2]; 2],
+        geometry: &BridgeGeometry<'_>,
+        request: &AntennaRequest,
+        stats: &mut AntennaStats,
+    ) -> Result<bool> {
+        let [left, y] = points[0];
+        let [right, _] = points[1];
+        let wire_half = i128::from(self.bridge_width / 2);
+        for &i in geometry.metal {
+            charge(stats, request, 1)?;
+            let rect = geometry.axis.rect(geometry.shapes[i].rect);
+            if i128::from(rect.lx) > left {
+                break;
+            }
+            if extent(rect)[1] == i128::from(self.bridge_width)
+                && center(rect)[1] == y
+                && i128::from(rect.ux) >= right
+                && i128::from(rect.lx) >= left - wire_half
+                && i128::from(rect.ux) <= right + wire_half
+                && self.isolated(rect, points, geometry, request, stats)?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub(super) fn transfers(
@@ -247,21 +324,19 @@ impl Model {
         let portal_cuts = indices(self.portal_cut);
         let bridge_metal = indices(self.bridge_layer);
         let measured_metal = indices(self.measured_layer);
+        let next_cuts = self.next_cut.map_or(&[][..], indices);
         if receiver_cuts.is_empty() || portal_cuts.len() < 2 || bridge_metal.is_empty() {
             return Ok(BTreeMap::new());
         }
-        let bridge_geometry = BridgeGeometry {
-            shapes,
-            metal: bridge_metal,
-            portals: portal_cuts,
-        };
-        let shape_count = receiver_cuts.len() + portal_cuts.len() + bridge_metal.len();
+        let shape_count =
+            receiver_cuts.len() + portal_cuts.len() + bridge_metal.len() + next_cuts.len();
         if shape_count > MAX_BRIDGE_SHAPES {
             return Err(Error::Budget(
                 "ANTENNA: sidewall bridge shapes per net".into(),
             ));
         }
-        charge_work(&mut stats.work, shape_count, request.max_work)?;
+        let overhead = shape_count.saturating_mul(10 * (shape_count.ilog2() as usize + 1));
+        charge_work(&mut stats.work, overhead, request.max_work)?;
         let cut_size = [i128::from(self.cut_square); 2];
         if receiver_cuts
             .iter()
@@ -273,13 +348,17 @@ impl Model {
                 "cut geometry differs from calibration",
             ));
         }
+        let lower_bound: BTreeSet<_> = receiver_cuts
+            .iter()
+            .map(|&i| (center(shapes[i].rect), dsu.find(i)))
+            .collect();
 
         let mut portals = Vec::with_capacity(portal_cuts.len());
         for &index in portal_cuts {
             let cut = shapes[index].rect;
             let point = center(cut);
             let mut root = None;
-            let mut pad = false;
+            let mut pad_axes = [false; 2];
             let mut multiple = false;
             for &i in measured_metal {
                 let metal = shapes[i].rect;
@@ -291,94 +370,89 @@ impl Model {
                     let owner = dsu.find(i);
                     multiple |= root.is_some_and(|old| old != owner);
                     root = Some(owner);
-                    pad |= extent(metal) == self.measured_pad_size.map(i128::from)
-                        && center(metal) == point;
+                    if center(metal) == point {
+                        let size = extent(metal);
+                        let wanted = self.measured_pad_size.map(i128::from);
+                        pad_axes[0] |= size == wanted;
+                        pad_axes[1] |= Axis::Y.along_cross(size) == wanted;
+                    }
                 }
             }
-            if pad
+            if pad_axes.into_iter().any(|p| p)
                 && !multiple
                 && let Some(root) = root
             {
                 portals.push(Portal {
                     center: point,
                     root,
+                    pad_axes,
                 });
             }
         }
-        // Accepted raw cuts have equal width. Their sorted input guarantees
-        // monotonic x centers through filtering, including duplicate records.
         let mut from_receiver = BTreeMap::new();
         let mut from_donor = BTreeMap::new();
-        for source in &portals {
-            if !components
-                .get(&source.root)
-                .is_some_and(|c| c.gates.len() == 1 && c.diffusion == 0 && c.terminals == 1)
-            {
-                continue;
+        for axis in [Axis::X, Axis::Y] {
+            let mut metal = bridge_metal.to_vec();
+            let mut cuts = portal_cuts.to_vec();
+            let mut later = next_cuts.to_vec();
+            for shape_list in [&mut metal, &mut cuts, &mut later] {
+                shape_list.sort_unstable_by_key(|&i| axis.rect(shapes[i].rect).lx);
             }
-            let [x, y] = source.center;
-            let expected = x + i128::from(self.receiver_offset);
-            let lower_at = receiver_cuts.partition_point(|&i| center(shapes[i].rect)[0] < expected);
-            charge_work(
-                &mut stats.work,
-                receiver_cuts.len().ilog2() as usize + 3,
-                request.max_work,
-            )?;
-            let mut has_lower_contact = false;
-            for &i in &receiver_cuts[lower_at..] {
-                charge(stats, request, 1)?;
-                let [lo_x, lo_y] = center(shapes[i].rect);
-                if lo_x != expected {
-                    break;
-                }
-                if lo_y == y && dsu.find(i) == source.root {
-                    has_lower_contact = true;
-                    break;
-                }
-            }
-            if !has_lower_contact {
-                continue;
-            }
-            let left_min = x - i128::from(self.spacing[1]);
-            let left_max = x - i128::from(self.spacing[0]);
-            let left = portals.partition_point(|p| p.center[0] < left_min);
-            charge_work(
-                &mut stats.work,
-                portals.len().ilog2() as usize + 32,
-                request.max_work,
-            )?;
-            for donor in &portals[left..] {
-                charge(stats, request, 1)?;
-                let [dx, dy] = donor.center;
-                if dx > left_max {
-                    break;
-                }
-                if dy != y || donor.root == source.root || components.contains_key(&donor.root) {
+            let geometry = BridgeGeometry {
+                axis,
+                shapes,
+                metal: &metal,
+                portals: &cuts,
+                next_cuts: &later,
+            };
+            portals.sort_unstable_by_key(|p| axis.along_cross(p.center));
+            for source in &portals {
+                if !source.pad_axes[axis as usize]
+                    || !components
+                        .get(&source.root)
+                        .is_some_and(|c| c.gates.len() == 1 && c.diffusion == 0 && c.terminals == 1)
+                {
                     continue;
                 }
-                for &i in bridge_metal {
-                    charge(stats, request, 1)?;
-                    let rect = shapes[i].rect;
-                    let wire_half = i128::from(self.bridge_width / 2);
-                    if i128::from(rect.lx) > dx {
-                        break;
+                let [x, y] = axis.along_cross(source.center);
+                for sign in [-1i128, 1] {
+                    let expected =
+                        axis.along_cross([x - sign * i128::from(self.receiver_offset), y]);
+                    charge_work(
+                        &mut stats.work,
+                        (shape_count.ilog2() as usize + 1) * 4,
+                        request.max_work,
+                    )?;
+                    if !lower_bound.contains(&(expected, source.root)) {
+                        continue;
                     }
-                    if extent(rect)[1] == i128::from(self.bridge_width)
-                        && center(rect)[1] == y
-                        && i128::from(rect.ux) >= x
-                        && i128::from(rect.lx) >= dx - wire_half
-                        && i128::from(rect.ux) <= x + wire_half
-                        && self.isolated(
-                            rect,
-                            [donor.center, source.center],
-                            &bridge_geometry,
-                            request,
-                            stats,
-                        )?
-                    {
-                        assign_unique(&mut from_receiver, source.root, donor.root);
-                        assign_unique(&mut from_donor, donor.root, source.root);
-                        break;
+                    let first = x + sign * i128::from(self.spacing[0]);
+                    let last = x + sign * i128::from(self.spacing[1]);
+                    let left = portals
+                        .partition_point(|p| axis.along_cross(p.center)[0] < first.min(last));
+                    for donor in &portals[left..] {
+                        charge(stats, request, 1)?;
+                        let [dx, dy] = axis.along_cross(donor.center);
+                        if dx > first.max(last) {
+                            break;
+                        }
+                        if !donor.pad_axes[axis as usize]
+                            || dy != y
+                            || donor.root == source.root
+                            || components.contains_key(&donor.root)
+                        {
+                            continue;
+                        }
+                        let points = [[x.min(dx), y], [x.max(dx), y]];
+                        if self.bridge_exists(points, &geometry, request, stats)? {
+                            charge_work(
+                                &mut stats.work,
+                                (shape_count.ilog2() as usize + 1) * 4,
+                                request.max_work,
+                            )?;
+                            assign_unique(&mut from_receiver, source.root, donor.root);
+                            assign_unique(&mut from_donor, donor.root, source.root);
+                        }
                     }
                 }
             }
@@ -412,26 +486,31 @@ mod tests {
             measured_layer: 1,
             portal_cut: 2,
             bridge_layer: 3,
+            next_cut: Some(4),
             cut_square: 200,
             measured_pad_size: [380, 320],
             bridge_pad_square: 330,
             bridge_width: 300,
-            spacing: [910, 930],
+            spacing: [910, 6000],
             receiver_offset: 230,
             thickness_dbu: 845,
         };
         // Dimensions from independent SKY130 fixtures. Include a valid second
         // bridge on the opposite side with no qualifying directed transition.
-        for (pitch, offset, wire, branch, far_terminal, expected) in [
-            (910, 230, true, false, false, true),
-            (920, 230, true, false, false, true),
-            (930, 230, true, false, false, true),
-            (920, 690, true, false, false, false),
-            (920, -230, true, false, false, false),
-            (6000, 230, true, false, false, false),
-            (920, 230, false, false, false, false),
-            (920, 230, true, true, false, false),
-            (920, 230, true, false, true, false),
+        for (pitch, offset, wire, branch, far_terminal, stacked, expected) in [
+            (910, 230, true, false, false, false, true),
+            (920, 230, true, false, false, false, true),
+            (930, 230, true, false, false, false, true),
+            (920, 690, true, false, false, false, false),
+            (920, -230, true, false, false, false, false),
+            (1200, 230, true, false, false, false, true),
+            (2000, 230, true, false, false, false, true),
+            (6000, 230, true, false, false, false, true),
+            (6040, 230, true, false, false, false, false),
+            (920, 230, false, false, false, false, false),
+            (920, 230, true, true, false, false, false),
+            (920, 230, true, false, true, false, false),
+            (920, 230, true, false, false, true, false),
         ] {
             let mut shapes = vec![
                 shape(0, [offset - 100, -100, offset + 100, 100]),
@@ -455,53 +534,84 @@ mod tests {
             if branch {
                 shapes.push(shape(3, [-450, -150, -150, 1000]));
             }
-            let mut by_layer = HashMap::<u32, Vec<usize>>::new();
-            for (i, shape) in shapes.iter().enumerate() {
-                by_layer.entry(shape.layer).or_default().push(i);
+            if stacked {
+                shapes.push(shape(4, [-580, -100, -380, 100]));
             }
-            for list in by_layer.values_mut() {
-                list.sort_by_key(|&i| (shapes[i].rect.lx, i));
-            }
-            let mut components = BTreeMap::from([(
-                0,
-                ComponentAreas {
-                    gate: 159_000,
-                    terminals: 1,
-                    gates: vec![(0, "buf/A".into())],
-                    ..ComponentAreas::default()
-                },
-            )]);
-            if far_terminal {
-                components.insert(
-                    2,
+            for (flip_x, flip_y, rotate) in [
+                (false, false, false),
+                (true, false, false),
+                (false, true, false),
+                (false, false, true),
+            ] {
+                let shapes: Vec<_> = shapes
+                    .iter()
+                    .map(|s| {
+                        let Rect {
+                            mut lx,
+                            mut ux,
+                            mut ly,
+                            mut uy,
+                        } = s.rect;
+                        if flip_x {
+                            (lx, ux) = (-ux, -lx);
+                        }
+                        if flip_y {
+                            (ly, uy) = (-uy, -ly);
+                        }
+                        if rotate {
+                            (lx, ux, ly, uy) = (-uy, -ly, lx, ux);
+                        }
+                        shape(s.layer, [lx, ly, ux, uy])
+                    })
+                    .collect();
+                let mut by_layer = HashMap::<u32, Vec<usize>>::new();
+                for (i, shape) in shapes.iter().enumerate() {
+                    by_layer.entry(shape.layer).or_default().push(i);
+                }
+                for list in by_layer.values_mut() {
+                    list.sort_by_key(|&i| (shapes[i].rect.lx, i));
+                }
+                let mut components = BTreeMap::from([(
+                    0,
                     ComponentAreas {
+                        gate: 159_000,
                         terminals: 1,
+                        gates: vec![(0, "buf/A".into())],
                         ..ComponentAreas::default()
                     },
+                )]);
+                if far_terminal {
+                    components.insert(
+                        2,
+                        ComponentAreas {
+                            terminals: 1,
+                            ..ComponentAreas::default()
+                        },
+                    );
+                }
+                let mut dsu = Dsu((0..shapes.len()).collect());
+                dsu.union(0, 1);
+                let mut stats = AntennaStats::default();
+                let transfers = model
+                    .transfers(
+                        Stage {
+                            by_layer: &by_layer,
+                            shapes: &shapes,
+                            components: &components,
+                            dsu: &mut dsu,
+                        },
+                        &AntennaRequest::default(),
+                        &mut stats,
+                    )
+                    .unwrap();
+                assert_eq!(
+                    transfers.get(&0).copied(),
+                    expected.then_some(2),
+                    "{pitch}/{offset}/{wire}/{branch}/{far_terminal}"
                 );
+                assert_eq!(transfers.len(), usize::from(expected));
+                assert_eq!(dsu.find(2), 2, "physical connectivity must be unchanged");
             }
-            let mut dsu = Dsu((0..shapes.len()).collect());
-            dsu.union(0, 1);
-            let mut stats = AntennaStats::default();
-            let transfers = model
-                .transfers(
-                    Stage {
-                        by_layer: &by_layer,
-                        shapes: &shapes,
-                        components: &components,
-                        dsu: &mut dsu,
-                    },
-                    &AntennaRequest::default(),
-                    &mut stats,
-                )
-                .unwrap();
-            assert_eq!(
-                transfers.get(&0).copied(),
-                expected.then_some(2),
-                "{pitch}/{offset}/{wire}/{branch}/{far_terminal}"
-            );
-            assert_eq!(transfers.len(), usize::from(expected));
-            assert_eq!(dsu.find(2), 2, "physical connectivity must be unchanged");
         }
     }
 }
