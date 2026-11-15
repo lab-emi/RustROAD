@@ -2092,6 +2092,8 @@ pub(crate) struct SpatialCapture<'a> {
     entries: usize,
     generation: u64,
     instance_generation: Option<u64>,
+    #[serde(skip_serializing_if = "<[usize]>::is_empty")]
+    free_offsets: &'a [usize],
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2104,6 +2106,8 @@ pub(crate) struct SpatialState {
     entries: usize,
     generation: u64,
     instance_generation: Option<u64>,
+    #[serde(default)]
+    free_offsets: Vec<usize>,
 }
 pub(crate) struct Spatial<'a> {
     pub(crate) input: &'a RouteInput,
@@ -2169,37 +2173,63 @@ impl<'a> Spatial<'a> {
             entries: self.entries,
             generation: self.generation,
             instance_generation: self.instances.as_ref().map(|v| v.generation),
+            free_offsets: &self.free_offsets,
         })
     }
     pub(crate) fn restore_capture(
         input: &'a RouteInput,
         limits: &'a RouteLimits,
-        state: SpatialState,
+        mut state: SpatialState,
+        rebuild: bool,
     ) -> Result<Self> {
         let n = state.shapes.len();
         if n > 4_000_000
             || n != state.alive.len()
             || n != state.routed.len()
+            || n.saturating_add(input.obstacles.len())
+                .saturating_add(input.instances.as_ref().map_or(0, InstanceObstacles::len))
+                > limits.max_obstacles
             || state.work > limits.max_comparisons
             || state.entries > limits.max_bin_entries
         {
             return Err(budget("replay spatial state limits"));
         }
+        if state.free_offsets.len() > n
+            || state.free_offsets.windows(2).any(|pair| pair[0] <= pair[1])
+            || state
+                .free_offsets
+                .iter()
+                .any(|&offset| state.alive.get(offset) != Some(&false))
+        {
+            return Err(invalid("replay spatial free offsets"));
+        }
+        if rebuild {
+            state.free_offsets = state
+                .alive
+                .iter()
+                .enumerate()
+                .rev()
+                .filter_map(|(i, &alive)| (!alive).then_some(i))
+                .collect();
+        }
         let mut result = Self::new(input, limits)?;
+        let mut free = state.free_offsets.iter().rev().copied().peekable();
         for (i, shape) in state.shapes.into_iter().enumerate() {
             if shape.layer as usize >= input.layers.len() || !shape.rect.valid() {
                 return Err(invalid("replay obstacle geometry"));
             }
-            let id = if state.routed[i] {
-                result.add_routed(shape)?
-            } else {
-                result.add_fixed(shape)?
-            };
-            if !state.alive[i] {
-                result.remove(id);
+            let reusable = free.next_if_eq(&i).is_some();
+            if !reusable {
+                result.index(result.len(), &shape)?;
+                result.dead_count += usize::from(!state.alive[i]);
             }
+            result.shapes.push(shape);
+            result.marks.push(0);
+            result.alive.push(state.alive[i]);
+            result.routed.push(state.routed[i]);
         }
-        if result.bin != state.bin || result.entries != state.entries {
+        result.free_offsets = state.free_offsets;
+        if result.bin != state.bin || (!rebuild && result.entries != state.entries) {
             return Err(invalid("replay spatial index differs"));
         }
         result.work = state

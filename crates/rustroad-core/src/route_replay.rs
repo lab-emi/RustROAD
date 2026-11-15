@@ -110,6 +110,9 @@ pub struct ReplayOptions {
     /// At most4096 current-epoch discovered states after a hard diagnostic.
     #[serde(default)]
     pub probe_search_frontier: bool,
+    /// Rebuild bins from live geometry, including for older compacted snapshots.
+    #[serde(default)]
+    pub rebuild_spatial_index: bool,
     /// Replay-only experiment: this owner may be displaced, all others stay hard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_victim: Option<u32>,
@@ -171,6 +174,8 @@ pub struct ReplayReport {
     pub expansions_before: usize,
     pub expansions_after: usize,
     pub comparisons_before: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub spatial_index_rebuilt: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_indices: Option<crate::routing::QueryIndices>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -813,7 +818,28 @@ pub fn replay(
         current.max_search_expansions = maximum;
         if options.hard_search {
             current.max_hard_search_expansions = Some(maximum);
+        } else {
+            current.max_hard_search_expansions = current
+                .max_hard_search_expansions
+                .map(|cap| cap.min(maximum));
         }
+        if let Some(scouts) = &mut current.scouts {
+            for cap in [
+                &mut scouts.wide_hard_expansions,
+                &mut scouts.soft_expansions,
+                &mut scouts.reuse_expansions,
+                &mut scouts.fast_expansions,
+                &mut scouts.owner_first_expansions,
+                &mut scouts.owner_progress_expansions,
+            ] {
+                *cap = (*cap).min(maximum);
+            }
+        }
+        current.eager_repair_expansions =
+            current.eager_repair_expansions.map(|cap| cap.min(maximum));
+        current.eager_repair_search_expansions = current
+            .eager_repair_search_expansions
+            .map(|cap| cap.min(maximum));
     }
     current.validate_track()?;
     let plan = input
@@ -860,7 +886,12 @@ pub fn replay(
     router.allowed_victim = options.allowed_victim;
     let prepared_work = router.spatial.instance_index_build_work()?;
     let source_work = state.spatial.work;
-    router.spatial = Spatial::restore_capture(input, &current, state.spatial)?;
+    router.spatial = Spatial::restore_capture(
+        input,
+        &current,
+        state.spatial,
+        options.rebuild_spatial_index,
+    )?;
     router.spatial.work = router
         .spatial
         .work
@@ -1144,6 +1175,7 @@ pub fn replay(
         terminal_probes,
         expansions_before: state.expansions,
         expansions_after: router.expansions,
+        spatial_index_rebuilt: options.rebuild_spatial_index,
         comparisons_before: if options.query_indices.is_some() {
             source_work
         } else {

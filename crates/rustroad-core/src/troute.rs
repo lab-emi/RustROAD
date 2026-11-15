@@ -13422,6 +13422,40 @@ mod tests {
     }
 
     #[test]
+    fn replay_preserves_compacted_shape_slots() {
+        let design = conflict_fixture(&[[100, 100], [900, 900]]);
+        let limits = limits();
+        let mut spatial = Spatial::new(&design, &limits).unwrap();
+        let blockage = |offset| Blockage {
+            layer: 0,
+            rect: rect(offset, 100, offset + 40, 140),
+            net: Some(9),
+        };
+        let free = spatial.add_routed(blockage(180)).unwrap();
+        let indexed_dead = spatial.add_routed(blockage(300)).unwrap();
+        let live = spatial.add_routed(blockage(440)).unwrap();
+        spatial.remove(free);
+        spatial.compact_dead().unwrap();
+        spatial.remove(indexed_dead);
+        let mut snapshot = serde_json::to_value(spatial.capture().unwrap()).unwrap();
+        let decode = |value: &serde_json::Value| serde_json::from_value(value.clone()).unwrap();
+        let mut exact =
+            Spatial::restore_capture(&design, &limits, decode(&snapshot), false).unwrap();
+        assert_eq!(exact.footprint(), spatial.footprint());
+        assert!(!exact.is_alive(indexed_dead) && exact.is_alive(live));
+        assert_eq!(exact.add_routed(blockage(710)).unwrap(), free);
+
+        // Old compacted snapshots retained shape IDs, but omitted the free list.
+        snapshot.as_object_mut().unwrap().remove("free_offsets");
+        assert!(Spatial::restore_capture(&design, &limits, decode(&snapshot), false).is_err());
+        let mut rebuilt =
+            Spatial::restore_capture(&design, &limits, decode(&snapshot), true).unwrap();
+        assert!(!rebuilt.is_alive(indexed_dead) && rebuilt.is_alive(live));
+        assert_eq!(rebuilt.add_routed(blockage(710)).unwrap(), free);
+        assert_eq!(rebuilt.add_routed(blockage(810)).unwrap(), indexed_dead);
+    }
+
+    #[test]
     fn hard_replay_preserves_occupied_routes_and_requires_an_explicit_bound() {
         let design = input(
             vec![
@@ -13443,6 +13477,17 @@ mod tests {
         std::fs::create_dir(&directory).unwrap();
         let snapshot = directory.join("state.json");
         let mut limits = limits();
+        limits.max_hard_search_expansions = Some(100_000);
+        limits.eager_repair_expansions = Some(100_000);
+        limits.eager_repair_search_expansions = Some(10_000);
+        limits.scouts = Some(crate::routing::ScoutLimits {
+            wide_hard_expansions: 1_000,
+            soft_expansions: 1_000,
+            reuse_expansions: 1_000,
+            fast_expansions: 1_000,
+            owner_first_expansions: 1_000,
+            owner_progress_expansions: 1_000,
+        });
         limits.replay = Some(replay::ReplayCapture {
             path: snapshot.clone(),
             net: Some(7),

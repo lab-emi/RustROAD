@@ -166,6 +166,9 @@ enum Command {
         /// Report <=4096 discovered states of the final hard diagnostic sink.
         #[arg(long, requires = "hard_search")]
         probe_search_frontier: bool,
+        /// Rebuild spatial bins from live shapes before the read-only search.
+        #[arg(long)]
+        rebuild_spatial_index: bool,
         /// Permit only this routed net to be displaced in a bounded soft replay.
         #[arg(long, requires = "max_search_expansions", conflicts_with_all = ["hard_search", "probe_terminals"])]
         allowed_victim: Option<u32>,
@@ -970,6 +973,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             heuristic_weight,
             hard_search,
             probe_search_frontier,
+            rebuild_spatial_index,
             allowed_victim,
             single_owner_repair_config,
             query_indices_config,
@@ -1024,6 +1028,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     heuristic_weight,
                     hard_search,
                     probe_search_frontier,
+                    rebuild_spatial_index,
                     allowed_victim,
                     single_owner_repair,
                     query_indices,
