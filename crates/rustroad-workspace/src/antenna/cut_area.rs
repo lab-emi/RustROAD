@@ -212,7 +212,8 @@ impl Model {
                 .ok_or_else(|| Error::Budget("ANTENNA: max_pair_checks".into()))?;
             charge_work(&mut stats.work, candidates.len(), request.max_work)?;
             let root = dsu.find(i);
-            let mut neighbor = None;
+            let mut seen: Vec<Rect> = Vec::new();
+            let mut total_scale: u8 = 1;
             for &j in candidates {
                 let cut = shapes[j].rect;
                 let dx = (i128::from(cut.lx) + lower_half - x).abs();
@@ -221,20 +222,19 @@ impl Model {
                 if scale == 1 || dsu.find(j) != root {
                     continue;
                 }
-                // A repeated physical cut is one neighbor. Distinct lower
-                // neighbors in one window were outside the calibration.
-                if neighbor.is_some_and(|(prior, _)| prior != cut) {
-                    return Err(fail(
-                        "ANTENNA_CUT_MODEL",
-                        "multiple lower contacts within one upper-cut window",
-                    ));
+                // A repeated physical cut is one neighbor; distinct lower
+                // neighbors within one upper-cut window each contribute their
+                // excess split weight conservatively.
+                if seen.contains(&cut) {
+                    continue;
                 }
-                neighbor = Some((cut, scale));
+                seen.push(cut);
+                total_scale = total_scale.saturating_add(scale - 1);
             }
-            if let Some((_, scale)) = neighbor {
+            if total_scale > 1 {
                 weights.push(Weight {
                     shape: i as u32,
-                    scale,
+                    scale: total_scale,
                 });
             }
         }
@@ -323,5 +323,27 @@ mod tests {
             .weights(&[0, 2], &[1, 3], &shapes, &mut dsu, &request, &mut stats)
             .unwrap();
         assert_eq!(lookup(&after_upper_metal, &shapes, &shapes[3].rect), 3);
+    }
+
+    #[test]
+    fn multiple_lower_contacts_accumulate_conservatively_and_dedupe_duplicates() {
+        // Two distinct lower cuts inside one upper-cut window plus a duplicate of the first.
+        let shapes = [
+            cut(1, [0, 0], 100),   // scale 4 (excess 3)
+            cut(1, [0, 0], 100),   // duplicate rect, ignored
+            cut(1, [500, 0], 100), // dx=500 >= 430, dy=0 < 430 -> scale 3 (excess 2)
+            cut(3, [0, 0], 400),
+        ];
+        let m = model();
+        let request = AntennaRequest::default();
+        let mut stats = AntennaStats::default();
+        let mut dsu = Dsu((0..shapes.len()).collect());
+        dsu.union(0, 3);
+        dsu.union(1, 3);
+        dsu.union(2, 3);
+        let weights = m
+            .weights(&[0, 1, 2], &[3], &shapes, &mut dsu, &request, &mut stats)
+            .unwrap();
+        assert_eq!(lookup(&weights, &shapes, &shapes[3].rect), 1 + 3 + 2);
     }
 }

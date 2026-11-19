@@ -5681,6 +5681,12 @@ pub(crate) fn route_with_prior(
         }
         let g = &guides[&net];
         let mut done = false;
+        let first_pass_cap = r
+            .limits
+            .scouts
+            .as_ref()
+            .and_then(|scouts| scouts.first_pass_expansions)
+            .map(|n| n.min(r.limits.max_search_expansions));
         for expand_by in [None, Some(r.plan.expand_margin)] {
             if r.close_expanded {
                 if let Some(m) = expand_by {
@@ -5691,7 +5697,13 @@ pub(crate) fn route_with_prior(
             } else {
                 r.mark_region(g, expand_by);
             }
-            match r.route_net(net, &groups[&net], &plans, false, false, &none, 0)? {
+            let prev_limit = r.trial_search_limit;
+            if r.close_expanded && first_pass_cap.is_some() {
+                r.trial_search_limit = first_pass_cap;
+            }
+            let first = r.route_net(net, &groups[&net], &plans, false, false, &none, 0);
+            r.trial_search_limit = prev_limit;
+            match first? {
                 Outcome::Routed(route, _) => {
                     r.release_portals(&groups[&net], &plans);
                     detour.record(net, &route);
@@ -13777,6 +13789,7 @@ mod tests {
             fast_expansions: 1_000,
             owner_first_expansions: 1_000,
             owner_progress_expansions: 1_000,
+            first_pass_expansions: None,
         });
         limits.replay = Some(replay::ReplayCapture {
             path: snapshot.clone(),

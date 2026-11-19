@@ -126,6 +126,10 @@ pub struct ScoutLimits {
     pub owner_first_expansions: usize,
     /// Promoted constrained owner attempt, also capped by its owner allocation.
     pub owner_progress_expansions: usize,
+    /// Optional tighter per-pin expansion cap during first-pass detailed routing
+    /// before negotiated rip-up-and-reroute (`None` uses `max_hard_search_expansions`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_pass_expansions: Option<usize>,
 }
 fn default_rule_grid_cells() -> usize {
     1_000_000
@@ -248,6 +252,12 @@ impl RouteLimits {
                 if work == 0 || work > self.max_search_expansions {
                     return Err(budget("scout limit exceeds per-search bounds"));
                 }
+            }
+            if scouts
+                .first_pass_expansions
+                .is_some_and(|n| n == 0 || n > self.max_search_expansions)
+            {
+                return Err(budget("first-pass scout limit exceeds per-search bounds"));
             }
         }
         if self
@@ -7167,5 +7177,37 @@ mod tests {
         );
         assert!(loaded_held_estimate(0, &input, Some(1)) >= PROCESS_BASE_BYTES);
         assert_eq!(loaded_held_estimate(0, &input, Some(u64::MAX)), u64::MAX);
+    }
+    #[test]
+    fn first_pass_expansions_serde_and_validation() {
+        let legacy_json = r#"{
+            "wide_hard_expansions": 1000,
+            "soft_expansions": 2000,
+            "reuse_expansions": 500,
+            "fast_expansions": 1500,
+            "owner_first_expansions": 400,
+            "owner_progress_expansions": 800
+        }"#;
+        let parsed: ScoutLimits = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(parsed.first_pass_expansions, None);
+        let serialized = serde_json::to_string(&parsed).unwrap();
+        assert!(!serialized.contains("first_pass_expansions"));
+
+        let mut limits = RouteLimits::default();
+        let mut scouts = parsed;
+        scouts.first_pass_expansions = Some(0);
+        limits.scouts = Some(scouts.clone());
+        assert!(matches!(limits.validate(), Err(Error::Budget(_))));
+
+        scouts.first_pass_expansions = Some(limits.max_search_expansions + 1);
+        limits.scouts = Some(scouts.clone());
+        assert!(matches!(limits.validate(), Err(Error::Budget(_))));
+
+        scouts.first_pass_expansions = Some(1000);
+        limits.scouts = Some(scouts);
+        limits.validate().unwrap();
+        assert!(serde_json::to_string(&limits.scouts)
+            .unwrap()
+            .contains("first_pass_expansions"));
     }
 }

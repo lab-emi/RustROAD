@@ -79,6 +79,12 @@ pub struct ElectrostaticConfig {
     /// describes what the legalizer must actually fit.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub spacing_aware_density: bool,
+    /// Minimum electrostatic width per connected signal pin, in milli-sites
+    /// (`0` disables pin-density inflation). Inflates only the density-solver
+    /// footprint of pin-dense small cells so congested combinational clusters
+    /// spread smoothly without manual placement blockages.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pin_density_sites_milli: u32,
     /// End at an exhausted evaluation cap with the best exact-target
     /// checkpoint, reporting `evaluation_horizon_after_checkpoint`; the common
     /// legalizer and the no-worse integer gate still decide acceptance.
@@ -90,6 +96,9 @@ pub struct ElectrostaticConfig {
 }
 fn is_true(value: &bool) -> bool {
     *value
+}
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
 }
 impl Default for ElectrostaticConfig {
     fn default() -> Self {
@@ -119,6 +128,7 @@ impl Default for ElectrostaticConfig {
             max_capacity_interactions: 64_000_000,
             max_work: 20_000_000_000,
             spacing_aware_density: false,
+            pin_density_sites_milli: 0,
             stop_at_evaluation_cap: true,
         }
     }
@@ -157,6 +167,7 @@ impl ElectrostaticConfig {
             || self.min_step_micros == 0
             || u64::from(self.min_step_micros) > 1000 * u64::from(self.initial_step_milli)
             || !(1..=16_000).contains(&self.max_move_bins_milli)
+            || self.pin_density_sites_milli > 16_000
         {
             return Err(super::invalid("electrostatic numerical parameter"));
         }
@@ -588,15 +599,44 @@ fn prepare_model<'a>(
     } else {
         0
     };
+    let pin_counts = if cfg.pin_density_sites_milli > 0 {
+        let mut counts = vec![0u32; n];
+        for net in &problem.nets {
+            if net.len() < 2 {
+                continue;
+            }
+            for pin in net {
+                if let PinRef::Cell(c) = *pin {
+                    let idx = c as usize;
+                    if idx < n {
+                        counts[idx] = counts[idx].saturating_add(1);
+                    }
+                }
+            }
+        }
+        Some(counts)
+    } else {
+        None
+    };
+    let max_body_width = i128::from(domain.size[0]);
     let bodies: Vec<_> = problem
         .widths
         .iter()
-        .map(|w| {
-            let w = *w + padding;
+        .enumerate()
+        .map(|(i, w)| {
+            let mut deposited = i128::from(*w) + i128::from(padding);
+            if let Some(counts) = pin_counts.as_deref() {
+                let pin_w = (i128::from(counts[i])
+                    * i128::from(problem.site)
+                    * i128::from(cfg.pin_density_sites_milli)
+                    + 999)
+                    / 1000;
+                deposited = deposited.max(pin_w).min(max_body_width);
+            }
             density::Body {
-                width: w as f64 / scale,
+                width: deposited as f64 / scale,
                 height: problem.row_height as f64 / scale,
-                area: (i128::from(w) * i128::from(problem.row_height)) as f64 / (scale * scale),
+                area: (deposited * i128::from(problem.row_height)) as f64 / (scale * scale),
             }
         })
         .collect();

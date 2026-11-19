@@ -515,6 +515,75 @@ fn spacing_aware_density_deposits_the_gap_but_keeps_physical_edges_and_defaults_
     .unwrap();
     super::super::check_legal(&p, &result.positions).unwrap();
 }
+
+#[test]
+fn pin_density_sites_milli_inflates_pin_dense_cells_only_and_defaults_off() {
+    let p = problem();
+    let limits = PlaceLimits::default();
+    let base = PlaceConfig {
+        global_iterations: 2,
+        cg_iterations: 20,
+        detailed_passes: 1,
+        ..PlaceConfig::default()
+    };
+    let mode = ElectrostaticConfig {
+        max_iterations: 12,
+        max_evaluations: 64,
+        workers: 2,
+        ..ElectrostaticConfig::default()
+    };
+    let text = serde_json::to_string(&mode).unwrap();
+    assert!(!text.contains("pin_density_sites_milli"));
+    let parsed: ElectrostaticConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(parsed.pin_density_sites_milli, 0);
+
+    let invalid = ElectrostaticConfig {
+        pin_density_sites_milli: 16_001,
+        ..mode.clone()
+    };
+    assert!(invalid.validate().is_err());
+
+    let enabled = ElectrostaticConfig {
+        pin_density_sites_milli: 4_000,
+        ..mode.clone()
+    };
+    assert!(enabled.validate().is_ok());
+    assert!(
+        serde_json::to_string(&enabled)
+            .unwrap()
+            .contains("pin_density_sites_milli")
+    );
+    let domain = Domain::new(super::interval_region(&p).unwrap()).unwrap();
+    let relative = Domain {
+        origin: [0, 0],
+        ..domain
+    };
+    let pins = p.nets.iter().map(Vec::len).sum();
+    let bodies = |mode: &ElectrostaticConfig| {
+        let config = PlaceConfig {
+            electrostatic: Some(mode.clone()),
+            ..base.clone()
+        };
+        let model = super::prepare_model(&p, &config, relative, pins, 2)
+            .ok()
+            .unwrap();
+        (model.bodies.clone(), model.project(0, [0.0, 0.0]).ok().unwrap())
+    };
+    let (plain, plain_edge) = bodies(&mode);
+    let (inflated, inflated_edge) = bodies(&enabled);
+    assert_eq!(plain_edge, inflated_edge);
+    assert!(inflated.iter().zip(&plain).any(|(a, b)| a.area > b.area));
+    let result = super::super::place(
+        &p,
+        &PlaceConfig {
+            electrostatic: Some(enabled),
+            ..base
+        },
+        &limits,
+    )
+    .unwrap();
+    super::super::check_legal(&p, &result.positions).unwrap();
+}
 #[test]
 fn opt_in_is_bounded_legal_and_thread_deterministic_with_exact_fallback() {
     let p = problem();
